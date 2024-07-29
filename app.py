@@ -63,7 +63,7 @@ with st.sidebar:
         ''')
         #gateway_setup = f'https://github.com/mitrsudiaws/s3-file-gateway-to-amazon-bedrock-for-rag-with-onprem-data/blob/main/GATEWAY.md'
 
-        st.write("check out this [link](https://github.com/mitrsudiaws/s3-file-gateway-to-amazon-bedrock-for-rag-with-onprem-data/blob/main/GATEWAY.md)")
+        st.write("check out this [link](https://github.com/aws-samples/on-prem-to-bedrock-with-s3-file-gateway/blob/main/Gateway.md)")
         # st.link_button("Step 1. Create S3 File Gateway for On Prem Data", cfn_launch_s3gw ,help="Deploys S3 File gateway to connect to On Premises data")
     
     st.subheader('', divider='orange')
