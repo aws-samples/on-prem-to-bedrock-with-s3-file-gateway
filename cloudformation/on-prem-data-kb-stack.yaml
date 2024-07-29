@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A sample template for Knowledge base with Amazon Opensearch Serverless vector database.
+Parameters:
+  KnowledgeBaseName:
+    Default: on-prem-knowledge-base
+    Type: String
+    Description: The name of the knowledge base.
+  KnowledgeBaseDescription:
+    Default: This is a sample knowledge base.
+    Type: String
+    Description: The description of the knowledge base.
+  DataSourceName:
+    Default: on-prem-data-source
+    Type: String
+    Description: The name of the data source.
+  DataSourceDescription:
+    Default: This is a sample data source.
+    Type: String
+    Description: The description of the data source.
+  AmazonBedrockExecutionRoleForKnowledgeBaseArn:
+    Type: String
+    Description: The ARN of the AmazonBedrockExecutionRoleForKnowledgeBase.
+  CollectionARN:
+    Type: String
+    Description: The ARN of the collection.
+  S3BucketArn:
+    Type: String
+    Description: The ARN of the S3 bucket.
+  EnvironmentName:
+    Description: Unique name to distinguish different web application in the same AWS account (min length 1 and max length 4)
+    Type: String
+    MinLength: 1
+    MaxLength: 4
+Resources:
+  KnowledgeBaseWithAoss:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub "${KnowledgeBaseName}-${EnvironmentName}"
+      Description: !Ref KnowledgeBaseDescription
+      RoleArn: !Ref AmazonBedrockExecutionRoleForKnowledgeBaseArn
+      KnowledgeBaseConfiguration:
+        Type: "VECTOR"
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1'
+      StorageConfiguration:
+        Type: "OPENSEARCH_SERVERLESS"
+        OpensearchServerlessConfiguration:
+          CollectionArn: !Ref CollectionARN
+          VectorIndexName: "bedrock-sample-index"
+          FieldMapping:
+            VectorField: "vector"
+            TextField: "text"
+            MetadataField: "metadata"
+  SampleDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBaseWithAoss
+      Name: !Sub "${DataSourceName}-${EnvironmentName}"
+      Description: !Ref DataSourceDescription
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !Ref S3BucketArn
+  KnowledgeBaseId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/streamlitapp/${EnvironmentName}/KnowledgeBaseId"
+      Type: "String"
+      Value: !GetAtt KnowledgeBaseWithAoss.KnowledgeBaseId
+      Description: "SSM Parameter for knowledge base Id"
+      AllowedPattern: ".*"
+  DataSourceId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/streamlitapp/${EnvironmentName}/DataSourceId"
+      Type: "String"
+      Value: !GetAtt SampleDataSource.DataSourceId
+      Description: "SSM Parameter for Data Source Id"
+      AllowedPattern: ".*"

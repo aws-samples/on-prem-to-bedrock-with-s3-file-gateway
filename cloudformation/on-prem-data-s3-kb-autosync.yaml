@@ -1,0 +1,138 @@
+  AWSTemplateFormatVersion: 2010-09-09
+  Description: "Creates s3 bucket , notification configuration and Lambda function for ingesting data"
+  Parameters:
+    AOSSCollectionName:
+      Type: String
+      Description: Name of the Amazon OpenSearch Service Serverless (AOSS) collection.
+    S3BucketName:
+      Type: String
+      Description: Name of the Amazon OpenSearch Service Serverless (AOSS) collection.
+    EnvironmentName:
+      Description: Unique name to distinguish different web application in the same AWS account (min length 1 and max length 4)
+      Type: String
+      MinLength: 1
+      MaxLength: 4
+  Resources:
+    LambdaKBSyncExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Join
+        - '-'
+        - - LambdaKBSyncExecutionRole
+          - !Ref AOSSCollectionName
+          - !Ref EnvironmentName
+        AssumeRolePolicyDocument:
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+        Policies:
+          - PolicyName: S3Access
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource: arn:aws:logs:*:*:*
+                - Effect: Allow
+                  Action:
+                    - s3:Get*
+                    - s3:List*
+                    - s3:Put*
+                  Resource: '*'
+          - PolicyName: BedrockAPIPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - bedrock:Invoke*
+                    - bedrock:StartIngestionJob
+                  Resource: '*'
+          - PolicyName: SSMParameterAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ssm:GetParameters
+                    - ssm:GetParameter
+                    - ssm:GetParameterHistory
+                    - ssm:GetParametersByPath
+                  Resource: '*'
+    LambdaKBSync:
+      Type: AWS::Lambda::Function
+      DependsOn: LambdaKBSyncExecutionRole
+      Properties:
+        FunctionName: !Sub lambdakbsync-${EnvironmentName}
+        Handler: index.handler
+        ReservedConcurrentExecutions: 5
+        Role: !GetAtt LambdaKBSyncExecutionRole.Arn
+        Runtime: python3.12
+        Code:
+          ZipFile: !Sub |
+            import os
+            import json
+            import boto3
+
+            bedrockClient = boto3.client('bedrock-agent')
+
+            def handler(event, context):
+                print('Inside Lambda Handler')
+                print('event: ', event)
+                
+                ssm_client = boto3.client('ssm')
+
+                responseKnowledgeBaseId = ssm_client.get_parameter(
+                          Name='/streamlitapp/${EnvironmentName}/KnowledgeBaseId')
+                responseDataSourceId = ssm_client.get_parameter(
+                          Name='/streamlitapp/${EnvironmentName}/DataSourceId')
+
+                KnowledgeBaseId=responseKnowledgeBaseId['Parameter']['Value']
+                DataSourceId=responseDataSourceId['Parameter']['Value']
+                response = bedrockClient.start_ingestion_job(
+                    knowledgeBaseId=KnowledgeBaseId,
+                    dataSourceId=DataSourceId
+                )
+                
+                print('Ingestion Job Response: ', response)
+                
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps('response')
+                }
+        Timeout: 900
+        MemorySize: 10240
+    
+    S3DataBucketName:
+      Type: "AWS::S3::Bucket"
+      DependsOn: LambdaInvokePermission
+      Properties:
+        BucketName: !Sub '${S3BucketName}-${AWS::Region}-${AWS::AccountId}'
+        NotificationConfiguration:
+          LambdaConfigurations:
+            - Function: !GetAtt LambdaKBSync.Arn
+              Filter:
+                S3Key:
+                  Rules:
+                  - Value: ".pdf"
+                    Name: "suffix"
+              Event: "s3:ObjectCreated:*"
+    LambdaInvokePermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt LambdaKBSync.Arn
+        Action: lambda:InvokeFunction
+        Principal: s3.amazonaws.com
+        SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}-${AWS::Region}-${AWS::AccountId}'
+        SourceAccount: !Ref AWS::AccountId
+  Outputs:
+    S3BucketArn:
+      Value: !GetAtt S3DataBucketName.Arn
+
+
+

@@ -1,0 +1,366 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Amazon OpenSearch Serverless template to create an IAM user, encryption policy, data access policy and collection'
+
+Parameters:
+  EnvironmentName:
+    Description: Unique name to distinguish different web application in the same AWS account (min length 1 and max length 4)
+    Type: String
+    MinLength: 1
+    MaxLength: 4
+  AOSSCollectionName:
+    Default: onpremdata
+    Type: String
+    Description: Name of the Amazon OpenSearch Service Serverless (AOSS) collection.
+    MinLength: 1
+    MaxLength: 30
+    AllowedPattern: ^[a-z0-9](-*[a-z0-9])*
+    ConstraintDescription: Must be lowercase or numbers with a length of 1-63 characters.
+  AOSSIndexName:
+    Default: data-index
+    Type: String
+    Description: Name of the vector index in the Amazon OpenSearch Service Serverless (AOSS) collection.
+Resources:
+  # IAMUSer:
+  #   Type: 'AWS::IAM::User'
+  #   Properties:
+  #     UserName:  !Sub aossadmin${EnvironmentName}
+  #     Policies:
+  #       - PolicyName: OpenSearchServerlessReadOnlyPolicy
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - aoss:Describe*
+  #                 - aoss:Get*
+  #                 - aoss:List*
+  #               Resource: '*'
+  # "arn:aws:iam::${AWS::AccountId}:user/aossadmin${EnvironmentName}"
+  DataAccessPolicy:
+    Type: 'AWS::OpenSearchServerless::AccessPolicy'
+    Properties:
+      Name: !Sub vectordb-access-policy-${EnvironmentName}
+      Type: data
+      Description: Access policy for vectordb collection
+      Policy: !Sub >-
+        [{"Description":"Access for cfn user","Rules":[{"ResourceType":"index","Resource":["index/*/*"],"Permission":["aoss:*"]},
+        {"ResourceType":"collection","Resource":["collection/vectordb"],"Permission":["aoss:*"]}],
+        "Principal":["${AmazonBedrockExecutionRoleForKnowledgeBase.Arn}","${LambdaAOSSIndexCreationExecutionRole.Arn}"]}]
+  NetworkPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: !Sub vectordb-network-policy-${EnvironmentName}
+      Type: network
+      Description: Network policy for vectordb collection
+      Policy: !Sub >-
+        [{"Rules":[{"ResourceType":"collection","Resource":["collection/vectordb${EnvironmentName}"]}, {"ResourceType":"dashboard","Resource":["collection/vectordb${EnvironmentName}"]}],"AllowFromPublic":true}]
+  EncryptionPolicy:
+    Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+    Properties:
+      Name: !Sub vectordb-security-policy-${EnvironmentName}
+      Type: encryption
+      Description: Encryption policy for vectordb collection
+      Policy: !Sub >-
+        {"Rules":[{"ResourceType":"collection","Resource":["collection/vectordb${EnvironmentName}"]}],"AWSOwnedKey":true}
+  Collection:
+    Type: 'AWS::OpenSearchServerless::Collection'
+    Properties:
+      Name: !Sub vectordb${EnvironmentName}
+      Type: VECTORSEARCH
+      Description: Collection to holds timeseries data
+    DependsOn: EncryptionPolicy
+  AmazonBedrockExecutionRoleForKnowledgeBase:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+      - '-'
+      - - AmazonBedrockExecutionRoleForKnowledgeBase
+        - !Ref AOSSCollectionName
+        - !Ref EnvironmentName
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub '${AWS::AccountId}'
+              ArnLike:
+                AWS:SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*'
+      Policies:
+        - PolicyName: S3ReadOnlyAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:Get*
+                  - s3:List*
+                Resource: '*'
+        - PolicyName: AOSSAPIAccessAll
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !Sub arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*
+        - PolicyName: BedrockListAndInvokeModel
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:ListCustomModels
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
+  # AmazonBedrockExecutionRoleForAgentsQA:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     RoleName: AmazonBedrockExecutionRoleForAgents_SageMakerQA
+  #     AssumeRolePolicyDocument:
+  #       Statement:
+  #       - Effect: Allow
+  #         Principal:
+  #           Service: bedrock.amazonaws.com
+  #         Action: sts:AssumeRole
+  #     ManagedPolicyArns:
+  #       - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+  # NotebookRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     RoleName: !Join
+  #     - '-'
+  #     - - !Ref AOSSCollectionName
+  #       - NoteBookRole
+  #     Policies:
+  #       - PolicyName: CustomNotebookAccess
+  #         PolicyDocument:
+  #           Version: 2012-10-17
+  #           Statement:
+  #             - Sid: BedrockFullAccess
+  #               Effect: Allow
+  #               Action:
+  #                 - "bedrock:*"
+  #               Resource: "*"
+  #       - PolicyName: AOSSAPIAccessAll
+  #         PolicyDocument:
+  #           Version: '2012-10-17'
+  #           Statement:
+  #             - Effect: Allow
+  #               Action:
+  #                 - aoss:APIAccessAll
+  #               Resource: !Sub arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*
+  #     ManagedPolicyArns:
+  #       - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+  #       - arn:aws:iam::aws:policy/AmazonS3FullAccess
+  #       - arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess
+  #     AssumeRolePolicyDocument:
+  #       Version: 2012-10-17
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service:
+  #             - sagemaker.amazonaws.com
+  #           Action:
+  #             - 'sts:AssumeRole'
+  #         - Effect: Allow
+  #           Principal:
+  #             Service:
+  #             - bedrock.amazonaws.com
+  #           Action:
+  #             - 'sts:AssumeRole'
+  LambdaAOSSIndexCreationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join
+      - '-'
+      - - LambdaAOSSIndexCreationExecutionRole
+        - !Ref AOSSCollectionName
+        - !Ref EnvironmentName
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - s3:Get*
+                  - s3:Put*
+                  - s3:List*
+                Resource: '*'
+        - PolicyName: AOSSAPIAccessAll
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aoss:APIAccessAll
+                Resource: !Sub 'arn:aws:aoss:${AWS::Region}:${AWS::AccountId}:collection/*'
+        - PolicyName: BedrockListAndInvokeModel
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:ListCustomModels
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/*
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                  - ssm:GetParameterHistory
+                  - ssm:GetParametersByPath
+                Resource: '*'
+  CollectionEndpoint:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "/streamlitapp/${EnvironmentName}/CollectionEndpointURL"
+      Type: "String"
+      Value: !GetAtt Collection.CollectionEndpoint
+      Description: "SSM Parameter for Collection Endpoint URL"
+      AllowedPattern: ".*"
+  LambdaAOSSIndexCreation:
+    Type: AWS::Lambda::Function
+    DependsOn: CollectionEndpoint # This is required to ensure that the CollectionEndpoint is created before the LambdaAOSSIndexCreation function
+    Properties:
+      Handler: index.handler
+      FunctionName: !Sub lambdaaossindexcreation-${EnvironmentName}
+      ReservedConcurrentExecutions: 5
+      Role: !GetAtt LambdaAOSSIndexCreationExecutionRole.Arn
+      Runtime: python3.12
+      Layers: [!Sub 'arn:aws:lambda:${AWS::Region}:336392948345:layer:AWSSDKPandas-Python312:8']
+      Code:
+        ZipFile: !Sub |
+          # Create the vector index in Opensearch serverless, with the knn_vector field index mapping, specifying the dimension size, name and engine.
+          import boto3
+          import json
+          from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth, RequestError
+          from urllib.parse import urlparse
+          import cfnresponse
+          import time
+
+        
+          def handler(event,context):
+              try:
+
+                  sts_client = boto3.client('sts')
+                  boto3_session = boto3.session.Session()
+                  region = boto3_session.region_name
+
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                  if event['RequestType'] == 'Update':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+                      
+                  if event['RequestType'] == 'Create':
+                    
+                      service = "aoss"
+                      region_name = region
+
+                      credentials = boto3.Session().get_credentials()
+                      awsauth = AWSV4SignerAuth(credentials, region_name, service)
+
+                      ssm_client = boto3.client('ssm')
+
+                      body_json = {
+                        "settings": {
+                            "index.knn": "true",
+                            "number_of_shards": 1,
+                            "knn.algo_param.ef_search": 512,
+                            "number_of_replicas": 0,
+                        },
+                        "mappings": {
+                            "properties": {
+                              "vector": {
+                                  "type": "knn_vector",
+                                  "dimension": 1536,
+                                  "method": {
+                                      "name": "hnsw",
+                                      "engine": "faiss",
+                                      "space_type": "l2"
+                                  },
+                              },
+                              "text": {
+                                  "type": "text"
+                              },
+                              "metadata": {
+                                  "type": "text"         }
+                            }
+                        }
+                      }
+
+
+                      response = ssm_client.get_parameter(Name='/streamlitapp/${EnvironmentName}/CollectionEndpointURL')
+
+                      paramval =  response['Parameter']['Value']
+
+                      index_name = f"bedrock-sample-index"
+                      host = urlparse(paramval).netloc
+
+                      oss_client = OpenSearch(
+                      hosts=[{'host': host, 'port': 443}],
+                      http_auth=awsauth,
+                      use_ssl=True,
+                      verify_certs=True,
+                      connection_class=RequestsHttpConnection,
+                      timeout=300
+                      )
+
+                
+                      response = oss_client.indices.create(index=index_name, body=json.dumps(body_json))
+                      print('\nCreating index:')
+
+                      responseData = {'acknowledged': response['acknowledged']}
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+                      return
+              except Exception as e:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {'Message': str(e)})
+      Timeout: 900
+      MemorySize: 10240
+  BuildOSSIndex:
+    Type: 'Custom::BuildOSSIndex'
+    Properties:
+      ServiceToken: !GetAtt LambdaAOSSIndexCreation.Arn
+Outputs:
+  DashboardURL:
+    Value: !GetAtt Collection.DashboardEndpoint
+  CollectionARN:
+    Value: !GetAtt Collection.Arn
+  CollectionEndpoint:
+    Value: !GetAtt Collection.CollectionEndpoint
+  AmazonBedrockExecutionRoleForKnowledgeBaseArn:
+    Value: !GetAtt AmazonBedrockExecutionRoleForKnowledgeBase.Arn
+  LambdaAOSSIndexCreationExecutionRoleArn:
+    Value: !GetAtt LambdaAOSSIndexCreationExecutionRole.Arn  
+  AOSSCollectionName:
+    Value: !Ref AOSSCollectionName 
+  
+  
