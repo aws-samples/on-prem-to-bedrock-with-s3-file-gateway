@@ -5,7 +5,7 @@ This exercise guides users through the process of setting up a demo environment 
 ![arch.png](./images/arch.png)
 
 ### Pre-Requisites
-Acess to Base models must be enabled for this soltuion.Go to Bedrock console and enbale access to the Amazon Base Models and Claude 3 Sonnet Models.
+Acess to Base models must be enabled for this soltuion.Go to Bedrock console and enable access to the Amazon Base Models and Claude 3 Sonnet Models.
 
 ![modelaccess.png](./images/modelaccess.png)
 
