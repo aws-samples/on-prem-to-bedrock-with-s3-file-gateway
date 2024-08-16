@@ -62,7 +62,7 @@ Parameters:
   GitURL:
     Type: String
     Description: Initial repository for basic Hello World application
-    Default: https://github.com/mitrsudiaws/s3-file-gateway-to-amazon-bedrock-for-rag-with-onprem-data.git
+    Default: https://github.com/aws-samples/s3-file-gateway-to-amazon-bedrock-for-rag-with-onprem-data.git
 
   EnvironmentName:
     Description: Unique name to distinguish different web application in the same AWS account (min length 1 and max length 4)
